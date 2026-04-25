@@ -1,5 +1,6 @@
 """Historical wind data from Iowa Environmental Mesonet ASOS archive. No API key required."""
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ import requests
 BURBANK_STATION = "BUR"
 EATON_DATE = "2025-01-08"
 CACHE_PATH = Path(__file__).parent / "data" / "wind_jan8.json"
+FIXTURE_PATH = Path(__file__).parent / "data" / "fixtures" / "wind_jan8.json"
+VALID_DATA_MODES = {"auto", "real", "fixture"}
 
 # IEM ASOS archive endpoint
 _IEM_URL = "https://mesonet.agron.iastate.edu/api/1/asos.json"
@@ -85,6 +88,16 @@ def cache_to_file(obs: list[WindObs], path: Path = CACHE_PATH) -> None:
 def load_from_cache(path: Path = CACHE_PATH) -> list[WindObs] | None:
     if not path.exists():
         return None
+    return _load_from_json(path)
+
+
+def load_from_fixture(path: Path = FIXTURE_PATH) -> list[WindObs]:
+    if not path.exists():
+        raise FileNotFoundError(f"Wind fixture not found: {path}")
+    return _load_from_json(path)
+
+
+def _load_from_json(path: Path) -> list[WindObs]:
     data = json.loads(path.read_text())
     return [
         WindObs(
@@ -97,14 +110,42 @@ def load_from_cache(path: Path = CACHE_PATH) -> list[WindObs] | None:
     ]
 
 
-def get_wind_obs(station: str = BURBANK_STATION) -> list[WindObs]:
-    """Load from cache if present, else fetch from IEM and cache."""
+def _data_mode(mode: str | None = None) -> str:
+    mode = (mode or os.environ.get("AEGIS_DATA_MODE", "auto")).strip().lower()
+    if mode not in VALID_DATA_MODES:
+        raise ValueError(f"AEGIS_DATA_MODE must be one of {sorted(VALID_DATA_MODES)}")
+    return mode
+
+
+def get_wind_obs(station: str = BURBANK_STATION, data_mode: str | None = None) -> list[WindObs]:
+    """Load wind observations using auto, real, or fixture data mode."""
+    mode = _data_mode(data_mode)
+
+    if mode == "fixture":
+        obs = load_from_fixture()
+        print(f"[wind] loaded {len(obs)} fixture obs")
+        return obs
+
     cached = load_from_cache()
     if cached:
         print(f"[wind] loaded {len(cached)} obs from cache")
         return cached
-    obs = fetch_wind_obs(station)
-    cache_to_file(obs)
+
+    try:
+        obs = fetch_wind_obs(station)
+    except requests.RequestException:
+        if mode == "real":
+            raise
+        obs = load_from_fixture()
+        print(f"[wind] IEM fetch failed; using {len(obs)} fixture obs")
+        return obs
+
+    if obs or mode == "real":
+        cache_to_file(obs)
+        return obs
+
+    obs = load_from_fixture()
+    print(f"[wind] IEM returned no obs; using {len(obs)} fixture obs")
     return obs
 
 

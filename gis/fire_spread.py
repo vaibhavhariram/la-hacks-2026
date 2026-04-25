@@ -130,7 +130,7 @@ def export_snapshots(states: list[FireState], out_dir: Path = SNAPSHOTS_DIR) -> 
 def post_hazards(states: list[FireState], backend_url: str | None = None) -> None:
     """POST each fire state to /hazard endpoint as a circle approximation."""
     if backend_url is None:
-        backend_url = os.environ.get("BACKEND_URL", "http://localhost:8001")
+        backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
     for s in states:
         cx, cy = s.perimeter.centroid.x, s.perimeter.centroid.y

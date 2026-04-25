@@ -12,6 +12,9 @@ from google import genai
 
 MODEL_ID = "gemma-2-2b-it"
 FALLBACK_MODEL_ID = "gemini-2.0-flash"
+BLOCKED_KEYWORDS = ("block", "blocked", "closed", "closure", "debris", "collapse", "impassable", "downed", "washed out")
+PASSABLE_KEYWORDS = ("clear", "cleared", "passable", "open", "reopened", "safe to pass")
+COORD_RE = re.compile(r"(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)")
 
 _PROMPT_TEMPLATE = """\
 You are an emergency field report parser for wildfire response. Extract location and road status from the report.
@@ -59,6 +62,76 @@ def parse_report(text: str, client: genai.Client, model_id: str = MODEL_ID) -> F
         location_description=raw_json.get("location_description", ""),
         raw_text=text,
     )
+
+
+def parse_report_fallback(text: str) -> FieldReport:
+    """Deterministic parser used when Gemma is unavailable during demos."""
+    lowered = text.lower()
+    status = "unknown"
+    confidence = 0.35
+
+    if any(keyword in lowered for keyword in BLOCKED_KEYWORDS):
+        status = "blocked"
+        confidence = 0.72
+    elif any(keyword in lowered for keyword in PASSABLE_KEYWORDS):
+        status = "passable"
+        confidence = 0.68
+
+    lat = None
+    lng = None
+    match = COORD_RE.search(text)
+    if match:
+        lat = float(match.group(1))
+        lng = float(match.group(2))
+        if status != "unknown":
+            confidence = max(confidence, 0.85)
+        else:
+            confidence = 0.55
+
+    return FieldReport(
+        lat=lat,
+        lng=lng,
+        status=status,
+        confidence=confidence,
+        location_description="coordinates" if lat is not None and lng is not None else "unresolved",
+        raw_text=text,
+    )
+
+
+def parse_report_safe(
+    text: str,
+    client: genai.Client | None = None,
+    model_id: str = MODEL_ID,
+) -> FieldReport:
+    """Try Gemma first, then fall back to a deterministic parser."""
+    try:
+        active_client = client or make_client()
+        return parse_report(text, active_client, model_id=model_id)
+    except Exception:
+        return parse_report_fallback(text)
+
+
+def blocked_hazard_payload(
+    report: FieldReport,
+    min_confidence: float = 0.6,
+    radius_m: float = 100.0,
+) -> dict | None:
+    """Convert a blocked field report into a /hazard payload when actionable."""
+    if report.status != "blocked":
+        return None
+    if report.lat is None or report.lng is None:
+        return None
+    if report.confidence < min_confidence:
+        return None
+
+    severity = max(0.0, min(1.0, report.confidence))
+    return {
+        "type": "blocked",
+        "lat": round(report.lat, 6),
+        "lng": round(report.lng, 6),
+        "radius_m": radius_m,
+        "severity": round(severity, 3),
+    }
 
 
 def _extract_json(text: str) -> dict:

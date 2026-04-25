@@ -10,6 +10,7 @@ from gis.firms_pipeline import (
     _geojson_to_points,
     FirePoint,
     EATON_BBOX,
+    get_fire_points,
 )
 
 SAMPLE_CSV = """\
@@ -69,3 +70,10 @@ def test_eaton_bbox_sanity():
     assert w < e
     assert 33 < s < 35  # in LA latitude range
     assert -119 < w < -117  # in LA longitude range
+
+
+def test_fixture_mode_loads_points():
+    points = get_fire_points(data_mode="fixture")
+    assert len(points) >= 3
+    assert all(33 < p.lat < 35 for p in points)
+    assert all(-119 < p.lng < -117 for p in points)

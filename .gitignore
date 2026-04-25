@@ -13,6 +13,8 @@ venv/
 gis/data/*.json
 gis/data/*.csv
 gis/data/snapshots/
+!gis/data/fixtures/
+!gis/data/fixtures/**
 !gis/data/.gitkeep
 
 # OSM graph + audio

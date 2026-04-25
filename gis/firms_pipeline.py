@@ -10,6 +10,8 @@ import requests
 EATON_BBOX = (-118.3, 34.1, -117.9, 34.4)  # W, S, E, N
 EATON_DATE = "2025-01-08"
 CACHE_PATH = Path(__file__).parent / "data" / "eaton_fire_jan8.json"
+FIXTURE_PATH = Path(__file__).parent / "data" / "fixtures" / "eaton_fire_jan8.geojson"
+VALID_DATA_MODES = {"auto", "real", "fixture"}
 
 # FIRMS VIIRS archive endpoint (requires MAP_KEY)
 _FIRMS_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
@@ -84,8 +86,28 @@ def load_from_cache(path: Path = CACHE_PATH) -> dict | None:
     return None
 
 
-def get_fire_points(map_key: str | None = None) -> list[FirePoint]:
-    """Load from cache if present, else fetch from FIRMS and cache."""
+def load_from_fixture(path: Path = FIXTURE_PATH) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(f"FIRMS fixture not found: {path}")
+    return json.loads(path.read_text())
+
+
+def _data_mode(mode: str | None = None) -> str:
+    mode = (mode or os.environ.get("AEGIS_DATA_MODE", "auto")).strip().lower()
+    if mode not in VALID_DATA_MODES:
+        raise ValueError(f"AEGIS_DATA_MODE must be one of {sorted(VALID_DATA_MODES)}")
+    return mode
+
+
+def get_fire_points(map_key: str | None = None, data_mode: str | None = None) -> list[FirePoint]:
+    """Load fire points using auto, real, or fixture data mode."""
+    mode = _data_mode(data_mode)
+
+    if mode == "fixture":
+        fixture = load_from_fixture()
+        print(f"[firms] loaded {len(fixture['features'])} fixture points")
+        return _geojson_to_points(fixture)
+
     cached = load_from_cache()
     if cached:
         print(f"[firms] loaded {len(cached['features'])} points from cache")
@@ -94,11 +116,28 @@ def get_fire_points(map_key: str | None = None) -> list[FirePoint]:
     if not map_key:
         map_key = os.environ.get("FIRMS_MAP_KEY")
     if not map_key:
-        raise ValueError("FIRMS_MAP_KEY not set and no cache found")
+        if mode == "real":
+            raise ValueError("FIRMS_MAP_KEY not set and no cache found")
+        fixture = load_from_fixture()
+        print(f"[firms] FIRMS_MAP_KEY missing; using {len(fixture['features'])} fixture points")
+        return _geojson_to_points(fixture)
 
-    points = fetch_firms_points(map_key)
-    cache_to_file(points_to_geojson(points))
-    return points
+    try:
+        points = fetch_firms_points(map_key)
+    except requests.RequestException:
+        if mode == "real":
+            raise
+        fixture = load_from_fixture()
+        print(f"[firms] FIRMS fetch failed; using {len(fixture['features'])} fixture points")
+        return _geojson_to_points(fixture)
+
+    if points or mode == "real":
+        cache_to_file(points_to_geojson(points))
+        return points
+
+    fixture = load_from_fixture()
+    print(f"[firms] FIRMS returned no points; using {len(fixture['features'])} fixture points")
+    return _geojson_to_points(fixture)
 
 
 def _geojson_to_points(geojson: dict) -> list[FirePoint]:

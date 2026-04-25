@@ -89,7 +89,7 @@ def main():
     print(f"         {len(paths)} files written")
 
     if not args.no_post:
-        backend_url = os.environ.get("BACKEND_URL", "http://localhost:8001")
+        backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
         print(f"\n[POST] Sending {len(states)} hazard updates → {backend_url}")
         post_hazards(states, backend_url)
 
