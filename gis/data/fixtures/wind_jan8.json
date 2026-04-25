@@ -1,0 +1,38 @@
+[
+  {
+    "ts": "2025-01-08T00:53:00+00:00",
+    "speed_ms": 7.72,
+    "direction_deg": 30.0,
+    "station": "BUR"
+  },
+  {
+    "ts": "2025-01-08T01:53:00+00:00",
+    "speed_ms": 8.23,
+    "direction_deg": 40.0,
+    "station": "BUR"
+  },
+  {
+    "ts": "2025-01-08T02:53:00+00:00",
+    "speed_ms": 9.26,
+    "direction_deg": 35.0,
+    "station": "BUR"
+  },
+  {
+    "ts": "2025-01-08T03:53:00+00:00",
+    "speed_ms": 10.29,
+    "direction_deg": 45.0,
+    "station": "BUR"
+  },
+  {
+    "ts": "2025-01-08T04:53:00+00:00",
+    "speed_ms": 8.75,
+    "direction_deg": 50.0,
+    "station": "BUR"
+  },
+  {
+    "ts": "2025-01-08T05:53:00+00:00",
+    "speed_ms": 7.2,
+    "direction_deg": 40.0,
+    "station": "BUR"
+  }
+]
