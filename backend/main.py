@@ -42,46 +42,6 @@ HAZARDS: list[HazardState] = []
 ROUTES: list[RouteState] = []
 
 
-# ---------------------------------------------------------------------------
-# Mock helper functions
-# ---------------------------------------------------------------------------
-
-
-def build_mock_path(request: RouteRequest) -> list[list[float]]:
-    """
-    Build a fake-but-plausible path between two points.
-
-    This is intentionally simple so frontend teams can integrate against a stable
-    shape before real routing logic exists.
-    """
-
-    path: list[list[float]] = [[request.start_lat, request.start_lng]]
-    midpoint_count = random.randint(1, 2)
-
-    lat_delta = request.end_lat - request.start_lat
-    lng_delta = request.end_lng - request.start_lng
-
-    for index in range(1, midpoint_count + 1):
-        fraction = index / (midpoint_count + 1)
-        base_lat = request.start_lat + (lat_delta * fraction)
-        base_lng = request.start_lng + (lng_delta * fraction)
-
-        # Add a small offset so the path looks more like a road route than a
-        # perfectly straight line.
-        lat_offset = random.uniform(-0.0015, 0.0015)
-        lng_offset = random.uniform(-0.0015, 0.0015)
-
-        path.append(
-            [
-                round(base_lat + lat_offset, 6),
-                round(base_lng + lng_offset, 6),
-            ]
-        )
-
-    path.append([request.end_lat, request.end_lng])
-    return path
-
-
 def build_hazard_state(request: HazardRequest) -> HazardState:
     return HazardState(
         type=request.type,

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import logging
+import math
 from typing import Any
 from uuid import uuid4
-from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
@@ -28,29 +27,10 @@ def _load_routing_engine() -> Any:
     try:
         return importlib.import_module(settings.routing_engine_module)
     except ModuleNotFoundError as exc:
-        logger.warning(
-            "routing engine module '%s' could not be imported; trying file path '%s'",
-            settings.routing_engine_module,
-            settings.routing_engine_path,
-        )
-
-        engine_path = Path(settings.routing_engine_path).expanduser()
-        if not engine_path.is_absolute():
-            engine_path = (Path(__file__).resolve().parent.parent / engine_path).resolve()
-
-        if not engine_path.exists():
-            raise RoutingEngineError(
-                f"Routing engine not found. Tried module '{settings.routing_engine_module}' "
-                f"and file '{engine_path}'."
-            ) from exc
-
-        spec = importlib.util.spec_from_file_location("aegis_route_routing_engine", engine_path)
-        if spec is None or spec.loader is None:
-            raise RoutingEngineError(f"Routing engine file '{engine_path}' could not be loaded.") from exc
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        logger.exception("routing engine module '%s' could not be imported", settings.routing_engine_module)
+        raise RoutingEngineError(
+            f"Routing engine module '{settings.routing_engine_module}' is not available."
+        ) from exc
 
 
 def _normalize_path(raw_path: Any) -> list[list[float]]:
@@ -73,8 +53,39 @@ def _normalize_path(raw_path: Any) -> list[list[float]]:
     return normalized_path
 
 
+def _normalize_waypoints(raw_waypoints: Any) -> list[list[float]]:
+    if not isinstance(raw_waypoints, list):
+        raise RoutingEngineError("Routing engine returned invalid waypoints.")
+
+    normalized_path: list[list[float]] = []
+    for point in raw_waypoints:
+        if isinstance(point, dict):
+            lat = point.get("lat")
+            lng = point.get("lng")
+        elif isinstance(point, (list, tuple)) and len(point) == 2:
+            lat, lng = point
+        else:
+            raise RoutingEngineError("Routing engine returned malformed waypoints.")
+
+        try:
+            normalized_path.append([float(lat), float(lng)])
+        except (TypeError, ValueError) as exc:
+            raise RoutingEngineError("Routing engine returned non-numeric waypoints.") from exc
+
+    return normalized_path
+
+
+def _estimate_cost(path: list[list[float]]) -> float:
+    total = 0.0
+    for start_point, end_point in zip(path, path[1:]):
+        total += math.hypot(end_point[0] - start_point[0], end_point[1] - start_point[1])
+    return round(total, 6)
+
+
 async def handle_route_request(req: RouteRequest) -> dict[str, Any]:
     routing_engine = _load_routing_engine()
+    if not hasattr(routing_engine, "compute_route"):
+        raise RoutingEngineError("Routing engine module does not expose compute_route.")
 
     logger.info(
         "route requested unit_id=%s start=(%s, %s) end=(%s, %s)",
@@ -100,17 +111,32 @@ async def handle_route_request(req: RouteRequest) -> dict[str, Any]:
     if not isinstance(route_result, dict):
         raise RoutingEngineError("Routing engine returned an invalid response.")
 
-    path = _normalize_path(route_result.get("path"))
-    if not path:
-        raise NoRouteFoundError("No route found.")
+    if "path" in route_result:
+        path = _normalize_path(route_result.get("path"))
+        if not path:
+            raise NoRouteFoundError("No route found.")
 
-    try:
-        cost = float(route_result["cost"])
-        rerouted = bool(route_result["rerouted"])
-    except KeyError as exc:
-        raise RoutingEngineError("Routing engine response is missing required fields.") from exc
-    except (TypeError, ValueError) as exc:
-        raise RoutingEngineError("Routing engine response contains invalid field values.") from exc
+        try:
+            cost = float(route_result["cost"])
+            rerouted = bool(route_result["rerouted"])
+        except KeyError as exc:
+            raise RoutingEngineError("Routing engine response is missing required fields.") from exc
+        except (TypeError, ValueError) as exc:
+            raise RoutingEngineError("Routing engine response contains invalid field values.") from exc
+    else:
+        success = bool(route_result.get("success"))
+        if not success:
+            error_message = str(route_result.get("error") or "Routing engine failure.")
+            if "no path" in error_message.lower():
+                raise NoRouteFoundError("No route found.")
+            raise RoutingEngineError(error_message)
+
+        path = _normalize_waypoints(route_result.get("waypoints"))
+        if not path:
+            raise NoRouteFoundError("No route found.")
+
+        cost = _estimate_cost(path)
+        rerouted = bool(route_result.get("rerouted", False))
 
     route_id = str(uuid4())
     response = {
