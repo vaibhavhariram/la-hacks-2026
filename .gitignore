@@ -1,0 +1,22 @@
+.DS_Store
+
+# Dependencies / build outputs
+node_modules/
+dist/
+
+# Frontend specific
+frontend/node_modules/
+frontend/dist/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+backend/.env
+backend/.env.*
+!backend/.env.example
