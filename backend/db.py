@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
@@ -50,3 +51,23 @@ async def close_db() -> None:
 
 def get_db() -> Optional[AsyncIOMotorDatabase]:
     return _db
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def save_route(route_data: dict[str, Any]) -> None:
+    db = get_db()
+    if db is None:
+        logger.warning("Skipping route save because the database is unavailable.")
+        return
+
+    document = dict(route_data)
+    document.setdefault("created_at", utc_now_iso())
+
+    try:
+        await db["routes"].insert_one(document)
+        logger.info("route saved route_id=%s", document.get("route_id"))
+    except Exception:
+        logger.exception("Failed to save route route_id=%s", document.get("route_id"))

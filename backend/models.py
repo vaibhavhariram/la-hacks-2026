@@ -6,21 +6,29 @@ from pydantic import BaseModel, Field
 class RouteRequest(BaseModel):
     start_lat: float = Field(
         ...,
+        ge=-90.0,
+        le=90.0,
         description="Starting latitude for the route request.",
         examples=[34.0522],
     )
     start_lng: float = Field(
         ...,
+        ge=-180.0,
+        le=180.0,
         description="Starting longitude for the route request.",
         examples=[-118.2437],
     )
     end_lat: float = Field(
         ...,
+        ge=-90.0,
+        le=90.0,
         description="Destination latitude for the route request.",
         examples=[34.0689],
     )
     end_lng: float = Field(
         ...,
+        ge=-180.0,
+        le=180.0,
         description="Destination longitude for the route request.",
         examples=[-118.4452],
     )
@@ -47,9 +55,9 @@ class RouteResponse(BaseModel):
         description="Whether the route differs from the default path due to hazards or closures.",
         examples=[True],
     )
-    route_id: Optional[str] = Field(
-        default=None,
-        description="Optional identifier assigned to the generated route.",
+    route_id: str = Field(
+        ...,
+        description="Identifier assigned to the generated route.",
         examples=["route-9f3b2c"],
     )
 

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import math
+import logging
 import random
 import re
 from contextlib import asynccontextmanager
-from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from db import close_db, connect_db
+from db import close_db, connect_db, save_route
 from models import (
     FieldReportParsed,
     FieldReportRequest,
@@ -23,7 +22,11 @@ from models import (
     RouteState,
     StateResponse,
 )
-from services.db_writes import save_field_report, save_hazard_event, save_route, utc_now_iso
+from services.db_writes import save_field_report, save_hazard_event, utc_now_iso
+from services.route_service import NoRouteFoundError, RoutingEngineError, handle_route_request
+
+
+logger = logging.getLogger(__name__)
 
 
 class HealthResponse(BaseModel):
@@ -77,20 +80,6 @@ def build_mock_path(request: RouteRequest) -> list[list[float]]:
 
     path.append([request.end_lat, request.end_lng])
     return path
-
-
-def build_mock_cost(request: RouteRequest, path: list[list[float]]) -> float:
-    """
-    Produce a stable-looking mock cost derived from request geometry plus a small
-    random factor. This is not real routing cost.
-    """
-
-    lat_delta = request.end_lat - request.start_lat
-    lng_delta = request.end_lng - request.start_lng
-    straight_line_distance = math.hypot(lat_delta, lng_delta)
-    base_cost = straight_line_distance * 10000
-    complexity_bonus = len(path) * random.uniform(8.0, 20.0)
-    return round(base_cost + complexity_bonus, 2)
 
 
 def build_hazard_state(request: HazardRequest) -> HazardState:
@@ -154,15 +143,18 @@ async def create_route(
     request: RouteRequest,
     background_tasks: BackgroundTasks,
 ) -> RouteResponse:
-    # Mock routing only: generate a realistic-looking path and store it so the
-    # frontend can render active routes before the real engine is ready.
-    path = build_mock_path(request)
-    cost = build_mock_cost(request, path)
+    try:
+        route_payload = await handle_route_request(request)
+    except NoRouteFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RoutingEngineError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     route = RouteState(
-        route_id=str(uuid4()),
+        route_id=route_payload["route_id"],
         unit_id=request.unit_id,
-        path=path,
-        rerouted=False,
+        path=route_payload["path"],
+        rerouted=route_payload["rerouted"],
     )
     ROUTES.append(route)
 
@@ -171,19 +163,17 @@ async def create_route(
         {
             "route_id": route.route_id,
             "unit_id": request.unit_id,
-            "start_lat": request.start_lat,
-            "start_lng": request.start_lng,
-            "end_lat": request.end_lat,
-            "end_lng": request.end_lng,
+            "start": [request.start_lat, request.start_lng],
+            "end": [request.end_lat, request.end_lng],
             "path": route.path,
-            "cost": cost,
+            "cost": route_payload["cost"],
             "rerouted": route.rerouted,
         },
     )
 
     return RouteResponse(
         path=route.path,
-        cost=cost,
+        cost=route_payload["cost"],
         rerouted=route.rerouted,
         route_id=route.route_id,
     )
