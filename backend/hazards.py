@@ -1,6 +1,16 @@
 import math
 from threading import Lock
 
+
+def _haversine_m(lat1, lng1, lat2, lng2) -> float:
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 class HazardStore:
     def __init__(self):
         self._fire_nodes = {}
@@ -20,13 +30,15 @@ class HazardStore:
             self._fire_nodes.clear()
             self._blocked_nodes.clear()
 
-    def _haversine_m(lat1, lng1, lat2, lng2) -> float:
-        R = 6_371_000
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlambda = math.radians(lng2 - lng1)
-        a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    def update_hazard(self, node_id: int, lat: float, lng: float, severity: float, hazard_type: str) -> None:
+        if hazard_type == "blocked":
+            self.block_node(node_id)
+            return
+        self.add_fire_node(node_id=node_id, lat=lat, lng=lng, severity=severity)
+
+    def clear_road(self, node_id: int) -> None:
+        with self._lock:
+            self._blocked_nodes.pop(node_id, None)
 
     def get_fire_penalty_at(self, lat: float, lng: float) -> float:
         if not self._fire_nodes:
