@@ -2,72 +2,32 @@ from __future__ import annotations
 
 import math
 import random
-from datetime import datetime
-from typing import Literal
+import re
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-
-# ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
-
-class RouteRequest(BaseModel):
-    start_lat: float = Field(..., description="Starting latitude.")
-    start_lng: float = Field(..., description="Starting longitude.")
-    end_lat: float = Field(..., description="Destination latitude.")
-    end_lng: float = Field(..., description="Destination longitude.")
-    unit_id: str | None = Field(default=None, description="Optional responder unit id.")
-
-
-class RouteResponse(BaseModel):
-    path: list[list[float]] = Field(
-        ..., description="Mock route as ordered [lat, lng] coordinate pairs."
-    )
-    cost: float = Field(..., description="Mock route cost for frontend integration.")
-    rerouted: bool = Field(..., description="Whether the route was rerouted.")
-    route_id: str = Field(..., description="Unique route identifier.")
-
-
-class HazardRequest(BaseModel):
-    lat: float = Field(..., description="Hazard latitude.")
-    lng: float = Field(..., description="Hazard longitude.")
-    radius_m: float = Field(..., gt=0, description="Hazard impact radius in meters.")
-    severity: float = Field(..., description="Hazard severity score.")
-    type: Literal["fire", "blocked"] = Field(..., description="Hazard type.")
-
-
-class HazardResponse(BaseModel):
-    affected_nodes: int = Field(..., description="Mock count of affected graph nodes.")
-    updated_edges: int = Field(..., description="Mock count of updated graph edges.")
-
-
-class HazardState(BaseModel):
-    type: str
-    lat: float
-    lng: float
-    radius_m: float
-    severity: float
-    timestamp: str
-
-
-class RouteState(BaseModel):
-    route_id: str
-    path: list[list[float]]
-    rerouted: bool
-
-
-class StateResponse(BaseModel):
-    hazards: list[HazardState]
-    routes: list[RouteState]
+from db import close_db, connect_db
+from models import (
+    FieldReportParsed,
+    FieldReportRequest,
+    FieldReportResponse,
+    HazardRequest,
+    HazardResponse,
+    HazardState,
+    RouteRequest,
+    RouteResponse,
+    RouteState,
+    StateResponse,
+)
+from services.db_writes import save_field_report, save_hazard_event, save_route, utc_now_iso
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok"]
+    status: str
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +100,29 @@ def build_hazard_state(request: HazardRequest) -> HazardState:
         lng=request.lng,
         radius_m=request.radius_m,
         severity=request.severity,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=utc_now_iso(),
+    )
+
+
+def parse_field_report(request: FieldReportRequest) -> FieldReportParsed:
+    lowered_text = request.text.lower()
+
+    if any(keyword in lowered_text for keyword in ("block", "closed", "debris", "collapse")):
+        status = "blocked"
+        confidence = 0.9
+    else:
+        status = "passable"
+        confidence = 0.65
+
+    match = re.search(r"(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)", request.text)
+    lat = float(match.group(1)) if match else None
+    lng = float(match.group(2)) if match else None
+
+    return FieldReportParsed(
+        lat=lat,
+        lng=lng,
+        status=status,
+        confidence=confidence,
     )
 
 
@@ -149,7 +131,14 @@ def build_hazard_state(request: HazardRequest) -> HazardState:
 # ---------------------------------------------------------------------------
 
 
-app = FastAPI(title="Disaster Routing Mock API")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await connect_db()
+    yield
+    await close_db()
+
+
+app = FastAPI(title="Disaster Routing Mock API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -161,35 +150,91 @@ app.add_middleware(
 
 
 @app.post("/route", response_model=RouteResponse)
-async def create_route(request: RouteRequest) -> RouteResponse:
+async def create_route(
+    request: RouteRequest,
+    background_tasks: BackgroundTasks,
+) -> RouteResponse:
     # Mock routing only: generate a realistic-looking path and store it so the
     # frontend can render active routes before the real engine is ready.
     path = build_mock_path(request)
+    cost = build_mock_cost(request, path)
     route = RouteState(
         route_id=str(uuid4()),
+        unit_id=request.unit_id,
         path=path,
         rerouted=False,
     )
     ROUTES.append(route)
 
+    background_tasks.add_task(
+        save_route,
+        {
+            "route_id": route.route_id,
+            "unit_id": request.unit_id,
+            "start_lat": request.start_lat,
+            "start_lng": request.start_lng,
+            "end_lat": request.end_lat,
+            "end_lng": request.end_lng,
+            "path": route.path,
+            "cost": cost,
+            "rerouted": route.rerouted,
+        },
+    )
+
     return RouteResponse(
         path=route.path,
-        cost=build_mock_cost(request, path),
+        cost=cost,
         rerouted=route.rerouted,
         route_id=route.route_id,
     )
 
 
 @app.post("/hazard", response_model=HazardResponse)
-async def create_hazard(request: HazardRequest) -> HazardResponse:
+async def create_hazard(
+    request: HazardRequest,
+    background_tasks: BackgroundTasks,
+) -> HazardResponse:
     # Mock hazard application only: keep the hazard in memory and return fake
     # graph-impact counts so the frontend can exercise update flows.
-    HAZARDS.append(build_hazard_state(request))
+    hazard_state = build_hazard_state(request)
+    HAZARDS.append(hazard_state)
+
+    background_tasks.add_task(
+        save_hazard_event,
+        {
+            "type": request.type,
+            "lat": request.lat,
+            "lng": request.lng,
+            "radius_m": request.radius_m,
+            "severity": request.severity,
+            "timestamp": hazard_state.timestamp,
+        },
+    )
 
     return HazardResponse(
         affected_nodes=random.randint(5, 50),
         updated_edges=random.randint(10, 120),
     )
+
+
+@app.post("/field-report", response_model=FieldReportResponse)
+async def create_field_report(
+    request: FieldReportRequest,
+    background_tasks: BackgroundTasks,
+) -> FieldReportResponse:
+    parsed = parse_field_report(request)
+
+    background_tasks.add_task(
+        save_field_report,
+        {
+            "text": request.text,
+            "unit_id": request.unit_id,
+            "parsed": parsed.model_dump(mode="json"),
+            "received_at": utc_now_iso(),
+        },
+    )
+
+    return FieldReportResponse(parsed=parsed)
 
 
 @app.get("/state", response_model=StateResponse)

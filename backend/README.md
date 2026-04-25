@@ -6,11 +6,14 @@ From the repo root:
 
 ```bash
 cd backend
+cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
+
+Add your MongoDB settings to `.env` before starting the server if you want database writes enabled.
 
 The API will start at:
 
