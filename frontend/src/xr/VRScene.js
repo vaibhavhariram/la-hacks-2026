@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { latLngToWorld } from '../utils/coords.js';
+import { latLngToWorldMercator, worldToLatLngMercator } from '../utils/mercator.js';
 import { TweenManager } from '../utils/tween.js';
 
 const CENTER_LAT = 34.1897;
@@ -17,6 +17,11 @@ const FLY_SPEED = 3;        // units/frame at full thumbstick deflection
 const ZOOM_SPEED = 8;       // altitude change per frame
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN ?? '';
+
+// Keep overlays visible above the terrain mesh.
+const HAZARD_Y = 40;
+const ROUTE_Y = 60;
+const PROJ = { centerLat: CENTER_LAT, centerLng: CENTER_LNG, zoom: ZOOM, tileGrid: TILE_GRID, worldSize: WORLD_SIZE };
 
 function latLngToTile(lat, lng, zoom) {
   const n = Math.pow(2, zoom);
@@ -63,6 +68,9 @@ export class VRScene {
     this._terrain = null;
     this._dummy = new THREE.Object3D();
 
+    this._uiGroup = null;
+    this._exitButton = null;
+
     this._startPos = null;
     this._endPos = null;
     this._onDispatch = null;
@@ -94,6 +102,7 @@ export class VRScene {
     this._buildFireMesh();
     this._buildRouteGroup();
     this._buildMarkers();
+    this._buildUiOverlay();
 
     this._loadTerrain();
 
@@ -240,7 +249,7 @@ export class VRScene {
     this._hazardMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this._hazardMesh.count = 0;
     this._hazardMesh.rotation.x = -Math.PI / 2;
-    this._hazardMesh.position.y = 3;
+    this._hazardMesh.position.y = HAZARD_Y;
     this._worldGroup.add(this._hazardMesh);
   }
 
@@ -261,6 +270,47 @@ export class VRScene {
     };
     this._startMarker = makeRing(0x00ff88);
     this._endMarker = makeRing(0xff4444);
+  }
+
+  _buildUiOverlay() {
+    // Fixed-to-view UI so users can exit VR without relying on DOM clicks.
+    this._uiGroup = new THREE.Group();
+    this._uiGroup.position.set(0.25, -0.25, -0.8);
+    this.camera.add(this._uiGroup);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 192;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#ff4400';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+    ctx.fillStyle = '#ff4400';
+    ctx.font = 'bold 64px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('EXIT VR', canvas.width / 2, canvas.height / 2);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+
+    const geo = new THREE.PlaneGeometry(0.35, 0.13);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    this._exitButton = new THREE.Mesh(geo, mat);
+    this._exitButton.name = 'exit-vr-button';
+    this._uiGroup.add(this._exitButton);
+  }
+
+  _uiHit(controller) {
+    if (!this._exitButton) return false;
+    const raycaster = new THREE.Raycaster();
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+    const origin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+    raycaster.set(origin, dir);
+    const hits = raycaster.intersectObject(this._exitButton, false);
+    return hits.length > 0;
   }
 
   _setupControllers() {
@@ -288,26 +338,42 @@ export class VRScene {
       return hits.length ? hits[0].point : null;
     };
 
-    // left trigger → set start
+    // left trigger → set start (or UI click)
     ctrl0.addEventListener('selectstart', () => {
+      if (this._uiHit(ctrl0)) {
+        this.destroy();
+        return;
+      }
       const hit = getTerrainHit();
       if (!hit) return;
-      this._startPos = hit.clone();
-      this._startMarker.position.set(hit.x, hit.y + 5, hit.z);
+      const local = this._worldGroup.worldToLocal(hit.clone());
+      this._startPos = local.clone();
+      this._startMarker.position.set(local.x, local.y + 5, local.z);
       this._startMarker.visible = true;
     });
 
-    // right trigger → set end
+    // right trigger → set end (or UI click)
     ctrl1.addEventListener('selectstart', () => {
+      if (this._uiHit(ctrl1)) {
+        this.destroy();
+        return;
+      }
       const hit = getTerrainHit();
       if (!hit) return;
-      this._endPos = hit.clone();
-      this._endMarker.position.set(hit.x, hit.y + 5, hit.z);
+      const local = this._worldGroup.worldToLocal(hit.clone());
+      this._endPos = local.clone();
+      this._endMarker.position.set(local.x, local.y + 5, local.z);
       this._endMarker.visible = true;
     });
 
     // right grip → dispatch
-    ctrl1.addEventListener('squeezestart', () => this._dispatchRoute());
+    ctrl1.addEventListener('squeezestart', () => {
+      if (this._uiHit(ctrl1)) {
+        this.destroy();
+        return;
+      }
+      this._dispatchRoute();
+    });
   }
 
   // Read gamepad thumbsticks each frame inside the XR session
@@ -350,13 +416,12 @@ export class VRScene {
 
   _dispatchRoute() {
     if (!this._startPos || !this._endPos || !this._onDispatch) return;
-    const METERS = 100;
-    const LAT_M = 111320;
-    const LNG_M = 111320 * Math.cos((CENTER_LAT * Math.PI) / 180);
-    const startLat = CENTER_LAT - (this._startPos.z * METERS) / LAT_M;
-    const startLng = CENTER_LNG + (this._startPos.x * METERS) / LNG_M;
-    const endLat   = CENTER_LAT - (this._endPos.z * METERS) / LAT_M;
-    const endLng   = CENTER_LNG + (this._endPos.x * METERS) / LNG_M;
+    const start = worldToLatLngMercator(this._startPos.x, this._startPos.z, PROJ);
+    const end = worldToLatLngMercator(this._endPos.x, this._endPos.z, PROJ);
+    const startLat = start.lat;
+    const startLng = start.lng;
+    const endLat = end.lat;
+    const endLng = end.lng;
     this._onDispatch({ lat: startLat, lng: startLng }, { lat: endLat, lng: endLng });
   }
 
@@ -366,7 +431,7 @@ export class VRScene {
     let i = 0;
     for (const h of hazards) {
       if (i >= 512) break;
-      const w = latLngToWorld(h.lat, h.lng);
+      const w = latLngToWorldMercator(h.lat, h.lng, PROJ);
       this._dummy.position.set(w.x, 0, w.z);
       const scale = h.radius_m / 100;
       this._dummy.scale.set(scale, scale, scale);
@@ -389,8 +454,8 @@ export class VRScene {
       const wps = r.waypoints ?? r.path ?? [];
       if (wps.length < 2) continue;
       const pts = wps.map((wp) => {
-        const w = latLngToWorld(wp.lat ?? wp[0], wp.lng ?? wp[1]);
-        return new THREE.Vector3(w.x, 10, w.z);
+        const w = latLngToWorldMercator(wp.lat ?? wp[0], wp.lng ?? wp[1], PROJ);
+        return new THREE.Vector3(w.x, ROUTE_Y, w.z);
       });
       const curve = new THREE.CatmullRomCurve3(pts);
       const geo = new THREE.TubeGeometry(curve, 200, 1.5, 8, false);

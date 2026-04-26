@@ -130,7 +130,7 @@ async def lifespan(_: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Disaster Routing Mock API", lifespan=lifespan)
+app = FastAPI(title="Eye in the Sky API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

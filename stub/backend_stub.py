@@ -12,7 +12,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-app = FastAPI(title="AEGIS Backend Stub", version="0.1.0")
+app = FastAPI(title="Eye in the Sky Backend Stub", version="0.1.0")
 
 _hazards: list[dict] = []
 _field_reports: list[dict] = []

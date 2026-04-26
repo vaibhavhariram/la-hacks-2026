@@ -1,5 +1,5 @@
 """
-Road-following routing engine for Aegis-Route (OSMnx + NetworkX A*).
+Road-following routing engine for Eye in the Sky (OSMnx + NetworkX A*).
 
 This module matches the routing engine contract expected by
 `backend/services/route_service.py`:
@@ -85,10 +85,26 @@ def compute_route(start_lat: float, start_lng: float, end_lat: float, end_lng: f
         return {"path": path, "cost": round(straight_dist, 1), "rerouted": False}
 
     waypoints = result.get("waypoints") or []
-    path: list[list[float]] = [[float(wp["lat"]), float(wp["lng"])] for wp in waypoints]
-    if len(path) < 2:
+    snapped_path: list[list[float]] = [[float(wp["lat"]), float(wp["lng"])] for wp in waypoints]
+    if len(snapped_path) < 2:
         path = [[start_lat, start_lng], [end_lat, end_lng]]
         return {"path": path, "cost": round(straight_dist, 1), "rerouted": False}
+
+    # Stitch exact start/end coordinates onto the snapped road-node path so the
+    # frontend route polyline attaches to the user's selected points.
+    path: list[list[float]] = []
+    first = snapped_path[0]
+    last = snapped_path[-1]
+
+    start_close = _haversine_m(start_lat, start_lng, first[0], first[1]) <= 15
+    end_close = _haversine_m(end_lat, end_lng, last[0], last[1]) <= 15
+
+    path.append([start_lat, start_lng])
+    path.extend(snapped_path[1:] if start_close else snapped_path)
+    if end_close:
+        path[-1] = [end_lat, end_lng]
+    else:
+        path.append([end_lat, end_lng])
 
     total_dist = sum(
         _haversine_m(path[i][0], path[i][1], path[i + 1][0], path[i + 1][1])
@@ -97,4 +113,3 @@ def compute_route(start_lat: float, start_lng: float, end_lat: float, end_lng: f
     rerouted = bool(HAZARDS) and (total_dist > straight_dist * 1.05)
 
     return {"path": path, "cost": round(total_dist, 1), "rerouted": rerouted}
-

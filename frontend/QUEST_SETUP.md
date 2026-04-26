@@ -1,4 +1,4 @@
-# Quest 2 Setup — Aegis-Route VR
+# Quest 2 Setup — Eye in the Sky VR
 
 ## Prerequisites
 - Dev machine and Quest 2 on the **same WiFi network**

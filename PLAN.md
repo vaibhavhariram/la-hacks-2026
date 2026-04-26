@@ -1,4 +1,4 @@
-# AEGIS Person C — Implementation Plan
+# Eye in the Sky — Implementation Plan (Person C)
 
 > LAHacks 2026 · Person C owns GIS pipeline, fire simulation, Gemma parser, Fetch.ai agents
 > **APPROVED** — Phase 2 scaffolding in progress.

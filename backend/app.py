@@ -13,7 +13,7 @@ from gemma_parser import parse_field_report
 from geocoder import geocode_location
 from graph import nearest_node
 
-app = FastAPI(title="Aegis-Route API")
+app = FastAPI(title="Eye in the Sky API")
 
 app.add_middleware(
     CORSMiddleware,

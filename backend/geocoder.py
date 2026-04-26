@@ -1,7 +1,7 @@
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
 
-_geolocator = Nominatim(user_agent="aegis-route-hackathon")
+_geolocator = Nominatim(user_agent="eye-in-the-sky-hackathon")
 _geocode = RateLimiter(_geolocator.geocode, min_delay_seconds=1)
 
 # Bounding box: covers Altadena, Pasadena, and surrounding LA area

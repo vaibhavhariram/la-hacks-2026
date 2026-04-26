@@ -1,4 +1,4 @@
-# AEGIS Inter-Team Contract — Person C Assumptions
+# Eye in the Sky — Inter-Team Contract (Person C Assumptions)
 
 > Written 2026-04-25. These are assumed answers to the 4 coordination questions from PLAN.md.
 > **Override any line here the moment Person B responds.** Nothing here blocks build start.

@@ -1,4 +1,4 @@
-# AEGIS Laptop Demo Runbook
+# Eye in the Sky — Laptop Demo Runbook
 
 This is the no-surprises path for a judged single-laptop demo. It uses committed fixture data by default, so it does not depend on FIRMS, NOAA, Gemma, or MongoDB being online.
 
