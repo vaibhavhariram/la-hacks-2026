@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from config import settings
@@ -26,7 +27,12 @@ async def connect_db() -> None:
         return
 
     try:
-        _client = AsyncIOMotorClient(settings.mongo_uri)
+        _client = AsyncIOMotorClient(
+            settings.mongo_uri,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=settings.mongo_server_selection_timeout_ms,
+            connectTimeoutMS=settings.mongo_connect_timeout_ms,
+        )
         await _client.admin.command("ping")
         _db = _client[settings.db_name]
         logger.info("Connected to MongoDB database '%s'.", settings.db_name)
