@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Frontend
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# GIS data cache
+gis/data/*.json
+gis/data/*.csv
+gis/data/snapshots/
+!gis/data/fixtures/
+!gis/data/fixtures/**
+!gis/data/.gitkeep
+
+# OSM graph + audio
+*.graphml
+audio/
+backend/la_graph.graphml
+backend/cache/
+
+# Pytest / editor / OS
+.pytest_cache/
+.coverage
+.DS_Store
+.vscode/
+.idea/

@@ -4,6 +4,7 @@ import logging
 import random
 import re
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,6 +85,7 @@ def build_mock_path(request: RouteRequest) -> list[list[float]]:
 
 def build_hazard_state(request: HazardRequest) -> HazardState:
     return HazardState(
+        event_id=f"hazard-{uuid4().hex[:8]}",
         type=request.type,
         lat=request.lat,
         lng=request.lng,
@@ -144,7 +146,10 @@ async def create_route(
     background_tasks: BackgroundTasks,
 ) -> RouteResponse:
     try:
-        route_payload = await handle_route_request(request)
+        route_payload = await handle_route_request(
+            request,
+            hazards=[h.model_dump() for h in HAZARDS],
+        )
     except NoRouteFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RoutingEngineError as exc:

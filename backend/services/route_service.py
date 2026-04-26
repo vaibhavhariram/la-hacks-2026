@@ -73,16 +73,21 @@ def _normalize_path(raw_path: Any) -> list[list[float]]:
     return normalized_path
 
 
-async def handle_route_request(req: RouteRequest) -> dict[str, Any]:
+async def handle_route_request(req: RouteRequest, hazards: list[dict] | None = None) -> dict[str, Any]:
     routing_engine = _load_routing_engine()
 
+    # Inject current hazard state so the engine can route around fire
+    if hasattr(routing_engine, "HAZARDS"):
+        routing_engine.HAZARDS = hazards or []
+
     logger.info(
-        "route requested unit_id=%s start=(%s, %s) end=(%s, %s)",
+        "route requested unit_id=%s start=(%s, %s) end=(%s, %s) hazards=%s",
         req.unit_id,
         req.start_lat,
         req.start_lng,
         req.end_lat,
         req.end_lng,
+        len(hazards or []),
     )
 
     try:

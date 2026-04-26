@@ -1,0 +1,49 @@
+[project]
+name = "aegis-gis"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    # HTTP
+    "httpx>=0.27",
+    "requests>=2.31",
+
+    # GIS / geometry
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "geojson>=3.1",
+    "numpy>=1.26",
+    "scipy>=1.13",
+
+    # Database
+    "pymongo>=4.7",
+    "motor>=3.4",
+
+    # Google AI / Gemma — verified: from google import genai (v1.73.1)
+    "google-genai>=1.0",
+    "certifi>=2024.0",
+
+    # Fetch.ai agents
+    "uagents>=0.13",
+    "uagents-ai-engine>=0.4",
+
+    # Mock backend stub
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+
+    # Config
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gis*", "agents*", "stub*", "scripts*"]
