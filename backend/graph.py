@@ -4,9 +4,9 @@ import networkx as nx
 
 GRAPH_PATH = "backend/la_graph.graphml"
 
-# Covers Palisades, Malibu, Santa Monica
+# Covers Altadena, Pasadena, Eaton Fire area
 # Format: (north, south, east, west)
-BBOX = (34.10, 33.95, -118.30, -118.65)
+BBOX = (34.23, 34.12, -118.00, -118.22)
 
 def load_graph() -> nx.MultiDiGraph:
     if os.path.exists(GRAPH_PATH):

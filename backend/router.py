@@ -17,7 +17,7 @@ def _build_weight_fn():
     def weight(u, v, data):
         base = data.get("length", 50.0)
 
-        if hazard_store.is_blocked(u) or hazard_store.is_blocked(v):
+        if hazard_store.is_blocked(v):
             return 999_999
 
         u_data = G.nodes[u]
