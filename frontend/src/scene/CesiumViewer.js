@@ -45,7 +45,10 @@ export class CesiumViewer {
     this.hazardEntities = new Map();  // hazardId → Entity
     this.startMarker = null;
     this.endMarker = null;
+    this._startLatLng = null;
+    this._endLatLng = null;
     this._boundsCheckInterval = null;
+    this._pendingClickCallback = null;
     this._init(containerId);
   }
 
@@ -115,6 +118,12 @@ export class CesiumViewer {
 
     // Enforce CA bounds
     this._startBoundsEnforcement();
+
+    // Register any click handler that was attached before init completed
+    if (this._pendingClickCallback) {
+      this._registerClickHandler(this._pendingClickCallback);
+      this._pendingClickCallback = null;
+    }
 
     console.log('[CesiumViewer] Globe initialized — Altadena, CA');
   }
@@ -264,15 +273,13 @@ export class CesiumViewer {
     if (!this.viewer) return;
     const entity = this.viewer.entities.add({
       id: `hazard-${id}`,
-      position: Cartesian3.fromDegrees(h.lng, h.lat),
+      position: Cartesian3.fromDegrees(h.lng, h.lat, 0),
       ellipse: {
         semiMajorAxis: h.radius_m,
         semiMinorAxis: h.radius_m,
-        material: Color.fromCssColorString('#ff4400').withAlpha(0.45),
-        outline: true,
-        outlineColor: Color.fromCssColorString('#ff6600'),
-        outlineWidth: 2,
-        heightReference: HeightReference.CLAMP_TO_GROUND,
+        height: 0,
+        material: Color.fromCssColorString('#ff4400').withAlpha(0.25),
+        outline: false,
       },
     });
     this.hazardEntities.set(id, entity);
@@ -288,6 +295,7 @@ export class CesiumViewer {
 
   setStartMarker(lat, lng) {
     if (!this.viewer) return;
+    this._startLatLng = { lat, lng };
     if (this.startMarker) this.viewer.entities.remove(this.startMarker);
     this.startMarker = this.viewer.entities.add({
       id: 'marker-start',
@@ -313,6 +321,7 @@ export class CesiumViewer {
 
   setEndMarker(lat, lng) {
     if (!this.viewer) return;
+    this._endLatLng = { lat, lng };
     if (this.endMarker) this.viewer.entities.remove(this.endMarker);
     this.endMarker = this.viewer.entities.add({
       id: 'marker-end',
@@ -343,33 +352,39 @@ export class CesiumViewer {
   }
 
   getStartLatLng() {
-    if (!this.startMarker) return null;
-    const pos = this.startMarker.position.getValue();
-    const carto = Cartographic.fromCartesian(pos);
-    return { lat: CesiumMath.toDegrees(carto.latitude), lng: CesiumMath.toDegrees(carto.longitude) };
+    return this._startLatLng;
   }
 
   getEndLatLng() {
-    if (!this.endMarker) return null;
-    const pos = this.endMarker.position.getValue();
-    const carto = Cartographic.fromCartesian(pos);
-    return { lat: CesiumMath.toDegrees(carto.latitude), lng: CesiumMath.toDegrees(carto.longitude) };
+    return this._endLatLng;
   }
 
   // --- Click handling for desktop dispatch ---
 
   onLeftClick(callback) {
-    if (!this.viewer) return;
-    this.viewer.screenSpaceEventHandler.setInputAction((click) => {
-      const ray = this.viewer.camera.getPickRay(click.position);
-      const pos = this.viewer.scene.globe.pick(ray, this.viewer.scene);
+    if (this.viewer) {
+      this._registerClickHandler(callback);
+    } else {
+      this._pendingClickCallback = callback;
+    }
+  }
+
+  _registerClickHandler(callback) {
+    const handler = (event) => {
+      const position = event.position ?? event.endPosition;
+      if (!position) return;
+      const ray = this.viewer.camera.getPickRay(position);
+      const pos =
+        this.viewer.scene.globe.pick(ray, this.viewer.scene) ??
+        this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
       if (!pos) return;
       const carto = Cartographic.fromCartesian(pos);
       callback({
         lat: CesiumMath.toDegrees(carto.latitude),
         lng: CesiumMath.toDegrees(carto.longitude),
       });
-    }, ScreenSpaceEventType.LEFT_CLICK);
+    };
+    this.viewer.screenSpaceEventHandler.setInputAction(handler, ScreenSpaceEventType.LEFT_CLICK);
   }
 
   destroy() {

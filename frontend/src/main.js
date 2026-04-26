@@ -40,7 +40,6 @@ let clickState = 0; // 0=set start, 1=set end, 2=dispatch
 let dispatching = false;
 
 cesium.onLeftClick(async ({ lat, lng }) => {
-  if (replay.isPlaying) return;
 
   if (clickState === 0) {
     cesium.setStartMarker(lat, lng);
@@ -55,20 +54,35 @@ cesium.onLeftClick(async ({ lat, lng }) => {
     dispatching = true;
     const start = cesium.getStartLatLng();
     const end = cesium.getEndLatLng();
+    console.log('[dispatch] start:', start, 'end:', end);
     if (!start || !end) { dispatching = false; return; }
 
-    speak('Route calculated. Dispatching unit to destination.');
-    const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
-    const waypoints = result.waypoints ?? [];
-    cesium.addSingleRoute(waypoints, 'dispatched');
-    if (result.rerouted) {
-      speak('Warning. Route rerouted due to hazard. New path calculated.');
-      cesium.highlightReroute('dispatched');
+    updateInstructions('Calculating route...');
+    try {
+      const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
+      console.log('[dispatch] result:', result);
+      const waypoints = result.waypoints ?? [];
+      if (waypoints.length === 0) {
+        updateInstructions('No route found — try points closer to Altadena streets');
+        dispatching = false;
+        clickState = 0;
+        return;
+      }
+      cesium.addSingleRoute(waypoints, 'dispatched');
+      if (result.rerouted) {
+        speak('Warning. Route rerouted due to hazard. New path calculated.');
+        cesium.highlightReroute('dispatched');
+      } else {
+        speak('Route calculated. Dispatching unit to destination.');
+      }
+      updateInstructions('Click to set START point');
+    } catch (e) {
+      console.error('[dispatch] error:', e);
+      updateInstructions('Route error: ' + e.message);
+    } finally {
+      dispatching = false;
+      clickState = 0;
     }
-
-    clickState = 0;
-    dispatching = false;
-    updateInstructions('Click to set START point');
   }
 });
 
@@ -97,6 +111,27 @@ document.getElementById('replay-btn')?.addEventListener('click', () => {
 
   document.getElementById('replay-btn').textContent = 'STOP REPLAY';
   speak('Eaton Fire replay initiated. January eighth, twenty twenty five.');
+});
+
+// --- Demo route button ---
+// Pre-set: Lake Ave (west Altadena) → Eaton Ave (east Altadena), right through the fire path
+const DEMO_START = { lat: 34.1897, lng: -118.1480 };
+const DEMO_END   = { lat: 34.1895, lng: -118.0920 };
+
+document.getElementById('demo-route-btn')?.addEventListener('click', async () => {
+  cesium.setStartMarker(DEMO_START.lat, DEMO_START.lng);
+  cesium.setEndMarker(DEMO_END.lat, DEMO_END.lng);
+  updateInstructions('Calculating demo route...');
+  const result = await fetchRoute(DEMO_START.lat, DEMO_START.lng, DEMO_END.lat, DEMO_END.lng);
+  const waypoints = result.waypoints ?? [];
+  if (waypoints.length) {
+    cesium.addSingleRoute(waypoints, 'dispatched');
+    speak('Route calculated. Dispatching unit to destination.');
+    updateInstructions('Click REPLAY EATON FIRE to watch rerouting');
+  } else {
+    updateInstructions('No route found for demo coordinates');
+  }
+  clickState = 0;
 });
 
 // --- Home button ---

@@ -10,34 +10,45 @@ class RouteRequest(BaseModel):
     unit_id: str
 
 
-class Waypoint(BaseModel):
-    lat: float
-    lng: float
-
-
 class RouteResponse(BaseModel):
-    success: bool
-    waypoints: list[Waypoint]
-    node_path: list[int]
-    error: Optional[str] = None
+    path: list[list[float]]
+    cost: float
+    rerouted: bool
+    route_id: str
+
+
+class RouteState(BaseModel):
+    route_id: str
+    unit_id: str
+    path: list[list[float]]
+    rerouted: bool
+
 
 class HazardRequest(BaseModel):
     lat: float
     lng: float
     radius_m: float
     severity: float
-    hazard_type: str
-
-
-class AffectedNode(BaseModel):
-    node_id: int
-    lat: float
-    lng: float
-    new_cost: float
+    type: str = "fire"
 
 
 class HazardResponse(BaseModel):
-    affected_nodes: list[AffectedNode]
+    affected_nodes: int
+    updated_edges: int
+
+
+class HazardState(BaseModel):
+    type: str
+    lat: float
+    lng: float
+    radius_m: float
+    severity: float
+    timestamp: str
+
+
+class StateResponse(BaseModel):
+    hazards: list[HazardState]
+    routes: list[RouteState]
 
 
 class FieldReportRequest(BaseModel):
@@ -45,10 +56,12 @@ class FieldReportRequest(BaseModel):
     unit_id: Optional[str] = None
 
 
+class FieldReportParsed(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    status: str
+    confidence: float
+
+
 class FieldReportResponse(BaseModel):
-    success: bool
-    extracted_lat: Optional[float] = None
-    extracted_lng: Optional[float] = None
-    status: Optional[str] = None
-    confidence: Optional[float] = None
-    message: str
+    parsed: FieldReportParsed
