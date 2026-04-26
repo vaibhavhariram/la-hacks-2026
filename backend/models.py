@@ -60,6 +60,11 @@ class RouteResponse(BaseModel):
         description="Identifier assigned to the generated route.",
         examples=["route-9f3b2c"],
     )
+    unit_id: Optional[str] = Field(
+        default=None,
+        description="Optional identifier for the responding unit requesting the route.",
+        examples=["engine-12"],
+    )
 
 
 class HazardRequest(BaseModel):
@@ -206,6 +211,26 @@ class RouteState(BaseModel):
         ...,
         description="Whether the stored route has been rerouted from its original plan.",
         examples=[True],
+    )
+    start: Optional[List[float]] = Field(
+        default=None,
+        description="Original route start coordinate as [lat, lng].",
+        examples=[[34.0522, -118.2437]],
+    )
+    end: Optional[List[float]] = Field(
+        default=None,
+        description="Original route destination coordinate as [lat, lng].",
+        examples=[[34.0689, -118.4452]],
+    )
+    cost: Optional[float] = Field(
+        default=None,
+        description="Latest computed route traversal cost.",
+        examples=[412.8],
+    )
+    last_updated: Optional[str] = Field(
+        default=None,
+        description="Timestamp for the latest route calculation.",
+        examples=["2026-04-25T15:42:00Z"],
     )
 
 

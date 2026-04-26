@@ -4,6 +4,7 @@ import { fetchRoute } from '../api/client.js';
 import { speak } from '../audio/VoiceAlerts.js';
 
 const RAY_LENGTH = 20;
+const DISPATCH_UNIT_ID = 'dispatched';
 
 export class XRController {
   constructor(renderer, scene, markers, routeManager) {
@@ -100,12 +101,13 @@ export class XRController {
     speak('Route calculated. Dispatching unit to destination.');
 
     try {
-      const result = await fetchRoute(s.lat, s.lng, e.lat, e.lng);
+      const result = await fetchRoute(s.lat, s.lng, e.lat, e.lng, DISPATCH_UNIT_ID);
       const waypoints = result.waypoints ?? [];
-      this.routeManager.addSingleRoute(waypoints, 'dispatched');
+      const routeKey = result.unit_id ?? result.route_id ?? DISPATCH_UNIT_ID;
+      this.routeManager.addSingleRoute(waypoints, routeKey);
       if (result.rerouted) {
         speak('Warning. Route rerouted due to hazard. New path calculated.');
-        this.routeManager.highlightReroute('dispatched');
+        this.routeManager.highlightReroute(routeKey);
       }
     } finally {
       this._dispatching = false;

@@ -7,6 +7,10 @@ const COLOR_AMBER = new THREE.Color(0xffaa00);
 const ROUTE_Y = 3;
 const POLL_MS = 2000;
 
+function routeKey(route) {
+  return route.unit_id ?? route.route_id ?? 'route';
+}
+
 export class RouteManager {
   constructor(scene) {
     this.scene = scene;
@@ -50,16 +54,17 @@ export class RouteManager {
     const seen = new Set();
 
     for (const r of routesArray) {
-      seen.add(r.unit_id);
-      const existing = this.routes.get(r.unit_id);
+      const key = routeKey(r);
+      seen.add(key);
+      const existing = this.routes.get(key);
 
       if (!existing) {
         this._addRoute(r);
       } else if (r.rerouted && !existing.rerouted) {
-        this._updateRoute(r.unit_id, r);
-        this.highlightReroute(r.unit_id);
+        this._updateRoute(key, r);
+        this.highlightReroute(key);
       } else {
-        this._updateRoute(r.unit_id, r);
+        this._updateRoute(key, r);
       }
     }
 
@@ -89,7 +94,7 @@ export class RouteManager {
     const mat = new THREE.MeshBasicMaterial({ color: COLOR_BLUE.clone() });
     const mesh = new THREE.Mesh(geo, mat);
     this.group.add(mesh);
-    this.routes.set(r.unit_id, { mesh, material: mat, waypoints: r.waypoints, rerouted: r.rerouted, flashTimer: 0 });
+    this.routes.set(routeKey(r), { mesh, material: mat, waypoints: r.waypoints, rerouted: r.rerouted, flashTimer: 0 });
   }
 
   _updateRoute(unitId, r) {

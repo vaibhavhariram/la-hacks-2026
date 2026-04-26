@@ -23,7 +23,12 @@ from models import (
     StateResponse,
 )
 from services.db_writes import save_field_report, save_hazard_event, utc_now_iso
-from services.route_service import NoRouteFoundError, RoutingEngineError, handle_route_request
+from services.route_service import (
+    NoRouteFoundError,
+    RoutingEngineError,
+    apply_hazard_update,
+    handle_route_request,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +45,7 @@ class HealthResponse(BaseModel):
 
 HAZARDS: list[HazardState] = []
 ROUTES: list[RouteState] = []
+ACTIVE_ROUTE_REQUESTS: dict[str, RouteRequest] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +97,61 @@ def build_hazard_state(request: HazardRequest) -> HazardState:
         severity=request.severity,
         timestamp=utc_now_iso(),
     )
+
+
+def paths_differ(path_a: list[list[float]], path_b: list[list[float]]) -> bool:
+    if len(path_a) != len(path_b):
+        return True
+
+    for point_a, point_b in zip(path_a, path_b):
+        if len(point_a) != 2 or len(point_b) != 2:
+            return True
+        if abs(point_a[0] - point_b[0]) > 0.000001:
+            return True
+        if abs(point_a[1] - point_b[1]) > 0.000001:
+            return True
+
+    return False
+
+
+async def recompute_active_routes(background_tasks: BackgroundTasks) -> int:
+    updated_count = 0
+
+    for index, route in enumerate(list(ROUTES)):
+        original_request = ACTIVE_ROUTE_REQUESTS.get(route.route_id)
+        if original_request is None:
+            continue
+
+        route_payload = await handle_route_request(original_request, route_id=route.route_id)
+        rerouted = route_payload["rerouted"] or paths_differ(route.path, route_payload["path"])
+        updated_route = RouteState(
+            route_id=route.route_id,
+            unit_id=route.unit_id,
+            path=route_payload["path"],
+            rerouted=rerouted,
+            start=route.start,
+            end=route.end,
+            cost=route_payload["cost"],
+            last_updated=utc_now_iso(),
+        )
+        ROUTES[index] = updated_route
+        updated_count += 1
+
+        background_tasks.add_task(
+            save_route,
+            {
+                "route_id": updated_route.route_id,
+                "unit_id": updated_route.unit_id,
+                "start": updated_route.start,
+                "end": updated_route.end,
+                "path": updated_route.path,
+                "cost": updated_route.cost,
+                "rerouted": updated_route.rerouted,
+                "reason": "hazard_recompute",
+            },
+        )
+
+    return updated_count
 
 
 def parse_field_report(request: FieldReportRequest) -> FieldReportParsed:
@@ -155,8 +216,13 @@ async def create_route(
         unit_id=request.unit_id,
         path=route_payload["path"],
         rerouted=route_payload["rerouted"],
+        start=[request.start_lat, request.start_lng],
+        end=[request.end_lat, request.end_lng],
+        cost=route_payload["cost"],
+        last_updated=utc_now_iso(),
     )
     ROUTES.append(route)
+    ACTIVE_ROUTE_REQUESTS[route.route_id] = request
 
     background_tasks.add_task(
         save_route,
@@ -168,6 +234,7 @@ async def create_route(
             "path": route.path,
             "cost": route_payload["cost"],
             "rerouted": route.rerouted,
+            "reason": "initial_route",
         },
     )
 
@@ -176,6 +243,7 @@ async def create_route(
         cost=route_payload["cost"],
         rerouted=route.rerouted,
         route_id=route.route_id,
+        unit_id=route.unit_id,
     )
 
 
@@ -184,10 +252,20 @@ async def create_hazard(
     request: HazardRequest,
     background_tasks: BackgroundTasks,
 ) -> HazardResponse:
-    # Mock hazard application only: keep the hazard in memory and return fake
-    # graph-impact counts so the frontend can exercise update flows.
     hazard_state = build_hazard_state(request)
     HAZARDS.append(hazard_state)
+
+    try:
+        graph_update = await apply_hazard_update(
+            request.lat,
+            request.lng,
+            request.radius_m,
+            request.severity,
+            request.type,
+        )
+        await recompute_active_routes(background_tasks)
+    except RoutingEngineError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     background_tasks.add_task(
         save_hazard_event,
@@ -202,8 +280,8 @@ async def create_hazard(
     )
 
     return HazardResponse(
-        affected_nodes=random.randint(5, 50),
-        updated_edges=random.randint(10, 120),
+        affected_nodes=graph_update["affected_nodes"],
+        updated_edges=graph_update["updated_edges"],
     )
 
 
@@ -213,6 +291,27 @@ async def create_field_report(
     background_tasks: BackgroundTasks,
 ) -> FieldReportResponse:
     parsed = parse_field_report(request)
+
+    if parsed.status == "blocked" and parsed.lat is not None and parsed.lng is not None:
+        hazard_request = HazardRequest(
+            type="blocked",
+            lat=parsed.lat,
+            lng=parsed.lng,
+            radius_m=120,
+            severity=1.0,
+        )
+        HAZARDS.append(build_hazard_state(hazard_request))
+        try:
+            await apply_hazard_update(
+                hazard_request.lat,
+                hazard_request.lng,
+                hazard_request.radius_m,
+                hazard_request.severity,
+                hazard_request.type,
+            )
+            await recompute_active_routes(background_tasks)
+        except RoutingEngineError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     background_tasks.add_task(
         save_field_report,

@@ -73,7 +73,44 @@ def _normalize_path(raw_path: Any) -> list[list[float]]:
     return normalized_path
 
 
-async def handle_route_request(req: RouteRequest) -> dict[str, Any]:
+async def apply_hazard_update(
+    lat: float,
+    lng: float,
+    radius_m: float,
+    severity: float,
+    hazard_type: str,
+) -> dict[str, int]:
+    routing_engine = _load_routing_engine()
+    update_fn = getattr(routing_engine, "update_hazard", None)
+    if update_fn is None:
+        logger.warning("routing engine has no update_hazard(); using fallback impact counts")
+        affected_nodes = max(1, round(radius_m / 40))
+        updated_edges = max(affected_nodes * 2, round(radius_m / 15))
+        return {"affected_nodes": affected_nodes, "updated_edges": updated_edges}
+
+    try:
+        result = await run_in_threadpool(update_fn, lat, lng, radius_m, severity, hazard_type)
+    except Exception as exc:
+        logger.exception("routing_engine.update_hazard failed")
+        raise RoutingEngineError("Routing engine hazard update failure.") from exc
+
+    if not isinstance(result, dict):
+        affected_nodes = max(1, round(radius_m / 40))
+        updated_edges = max(affected_nodes * 2, round(radius_m / 15))
+        return {"affected_nodes": affected_nodes, "updated_edges": updated_edges}
+
+    return {
+        "affected_nodes": int(result.get("affected_nodes", 0)),
+        "updated_edges": int(result.get("updated_edges", 0)),
+    }
+
+
+async def handle_route_request(
+    req: RouteRequest,
+    *,
+    route_id: str | None = None,
+    force_rerouted: bool = False,
+) -> dict[str, Any]:
     routing_engine = _load_routing_engine()
 
     logger.info(
@@ -112,11 +149,11 @@ async def handle_route_request(req: RouteRequest) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise RoutingEngineError("Routing engine response contains invalid field values.") from exc
 
-    route_id = str(uuid4())
+    route_id = route_id or str(uuid4())
     response = {
         "path": path,
         "cost": cost,
-        "rerouted": rerouted,
+        "rerouted": rerouted or force_rerouted,
         "route_id": route_id,
     }
 

@@ -14,14 +14,10 @@ import {
   VerticalOrigin,
   ScreenSpaceEventType,
   ConstantProperty,
-  EllipsoidTerrainProvider,
 } from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
 const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
-if (!CESIUM_ION_TOKEN) {
-  console.warn('[CesiumViewer] VITE_CESIUM_ION_TOKEN is not set; terrain/imagery may fail to load.');
-}
 Ion.defaultAccessToken = CESIUM_ION_TOKEN ?? '';
 
 // Eaton Fire origin — Altadena, CA
@@ -38,22 +34,34 @@ const CA_BOUNDS = {
 };
 const SNAP_MARGIN = 3.0; // degrees outside CA before snap triggers
 
+function routeKey(route) {
+  return route.unit_id ?? route.route_id ?? 'route';
+}
+
 export class CesiumViewer {
   constructor(containerId) {
     this.viewer = null;
+    this.container = null;
     this.routeEntities = new Map();   // unitId → Entity
     this.hazardEntities = new Map();  // hazardId → Entity
     this.startMarker = null;
     this.endMarker = null;
     this._boundsCheckInterval = null;
-    this._init(containerId);
+    this.ready = this._init(containerId);
   }
 
   async _init(containerId) {
     // Cesium needs a real DOM container, not a canvas
-    const container = document.getElementById(containerId);
-    if (!container) {
+    this.container = document.getElementById(containerId);
+    if (!this.container) {
       console.error('[CesiumViewer] container not found:', containerId);
+      return;
+    }
+
+    if (!CESIUM_ION_TOKEN) {
+      const message = 'Cesium Ion token missing. Set VITE_CESIUM_ION_TOKEN in frontend/.env to load the real globe imagery and terrain.';
+      console.error(`[CesiumViewer] ${message}`);
+      this._renderFatalError(message);
       return;
     }
 
@@ -61,31 +69,29 @@ export class CesiumViewer {
     const oldCanvas = document.querySelector('canvas');
     if (oldCanvas) oldCanvas.remove();
 
-    const terrainProvider = CESIUM_ION_TOKEN
-      ? await createWorldTerrainAsync({
+    try {
+      const terrainProvider = await createWorldTerrainAsync({
         requestWaterMask: true,
         requestVertexNormals: true,
-      })
-      : new EllipsoidTerrainProvider();
+      });
 
-    this.viewer = new Viewer(container, {
-      terrainProvider,
-      baseLayer: false,
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      animation: false,
-      timeline: false,
-      fullscreenButton: false,
-      infoBox: false,
-      selectionIndicator: false,
-      shadows: false,
-      shouldAnimate: true,
-    });
+      this.viewer = new Viewer(this.container, {
+        terrainProvider,
+        baseLayer: false,
+        baseLayerPicker: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        animation: false,
+        timeline: false,
+        fullscreenButton: false,
+        infoBox: false,
+        selectionIndicator: false,
+        shadows: false,
+        shouldAnimate: true,
+      });
 
-    if (CESIUM_ION_TOKEN) {
       // Bing aerial via createWorldImagery — served through Ion CDN, always CORS-safe
       this.viewer.imageryLayers.removeAll();
       this.viewer.imageryLayers.add(
@@ -95,28 +101,55 @@ export class CesiumViewer {
           })
         )
       );
+
+      // Maximize terrain detail
+      this.viewer.scene.globe.maximumScreenSpaceError = 1.5;
+      this.viewer.scene.globe.tileCacheSize = 1000;
+
+      // Atmosphere, lighting, fog for depth
+      this.viewer.scene.globe.enableLighting = true;
+      this.viewer.scene.atmosphere.show = true;
+      this.viewer.scene.fog.enabled = true;
+      this.viewer.scene.fog.density = 0.0002;
+
+      // Anti-alias
+      this.viewer.scene.postProcessStages.fxaa.enabled = true;
+
+      // Fly home to Altadena on load
+      this.flyHome();
+
+      // Enforce CA bounds
+      this._startBoundsEnforcement();
+
+      console.log('[CesiumViewer] Globe initialized — Altadena, CA');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error('[CesiumViewer] Failed to initialize terrain/imagery:', error);
+      this._renderFatalError(`Cesium globe failed to load terrain or imagery: ${reason}`);
     }
+  }
 
-    // Maximize terrain detail
-    this.viewer.scene.globe.maximumScreenSpaceError = 1.5;
-    this.viewer.scene.globe.tileCacheSize = 1000;
-
-    // Atmosphere, lighting, fog for depth
-    this.viewer.scene.globe.enableLighting = true;
-    this.viewer.scene.atmosphere.show = true;
-    this.viewer.scene.fog.enabled = true;
-    this.viewer.scene.fog.density = 0.0002;
-
-    // Anti-alias
-    this.viewer.scene.postProcessStages.fxaa.enabled = true;
-
-    // Fly home to Altadena on load
-    this.flyHome();
-
-    // Enforce CA bounds
-    this._startBoundsEnforcement();
-
-    console.log('[CesiumViewer] Globe initialized — Altadena, CA');
+  _renderFatalError(message) {
+    if (!this.container) return;
+    this.container.innerHTML = `
+      <div style="
+        position:absolute;
+        inset:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:24px;
+        background:radial-gradient(circle at top, #16233d 0%, #09111f 45%, #05080f 100%);
+        color:#f4f7fb;
+        font-family:'Courier New', monospace;
+        text-align:center;
+      ">
+        <div style="max-width:720px; border:1px solid rgba(255, 91, 91, 0.55); background:rgba(0, 0, 0, 0.45); padding:24px;">
+          <div style="font-size:18px; letter-spacing:2px; color:#ff8f8f; margin-bottom:12px;">GLOBE INITIALIZATION FAILED</div>
+          <div style="font-size:13px; line-height:1.7; color:#d7e0ee;">${message}</div>
+        </div>
+      </div>
+    `;
   }
 
   flyHome() {
@@ -166,8 +199,9 @@ export class CesiumViewer {
   syncRoutes(routesArray) {
     const seen = new Set();
     for (const r of routesArray) {
-      seen.add(r.unit_id);
-      if (this.routeEntities.has(r.unit_id)) {
+      const key = routeKey(r);
+      seen.add(key);
+      if (this.routeEntities.has(key)) {
         this._updateRoute(r);
       } else {
         this._addRoute(r);
@@ -188,7 +222,7 @@ export class CesiumViewer {
       this._waypointsToCartesian(r.waypoints)
     );
     const entity = this.viewer.entities.add({
-      id: `route-${r.unit_id}`,
+      id: `route-${routeKey(r)}`,
       polyline: {
         positions,
         width: 6,
@@ -199,11 +233,11 @@ export class CesiumViewer {
         clampToGround: true,
       },
     });
-    this.routeEntities.set(r.unit_id, entity);
+    this.routeEntities.set(routeKey(r), entity);
   }
 
   _updateRoute(r) {
-    const entity = this.routeEntities.get(r.unit_id);
+    const entity = this.routeEntities.get(routeKey(r));
     if (!entity || !r.waypoints?.length) return;
     entity.polyline.positions = new ConstantProperty(
       Cartesian3.fromDegreesArrayHeights(this._waypointsToCartesian(r.waypoints))

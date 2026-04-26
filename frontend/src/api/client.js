@@ -40,7 +40,7 @@ export function normalizeState(state = {}) {
   };
 }
 
-export async function fetchRoute(startLat, startLng, endLat, endLng) {
+export async function fetchRoute(startLat, startLng, endLat, endLng, unitId = `unit-${Date.now()}`) {
   try {
     const res = await fetch(`${BASE_URL}/route`, {
       method: 'POST',
@@ -50,7 +50,7 @@ export async function fetchRoute(startLat, startLng, endLat, endLng) {
         start_lng: startLng,
         end_lat: endLat,
         end_lng: endLng,
-        unit_id: `unit-${Date.now()}`,
+        unit_id: unitId,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

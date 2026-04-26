@@ -9,6 +9,7 @@ const replay = new ReplayController();
 
 // --- State polling (every 2s) ---
 let latestHazards = [];
+let pollIntervalId = null;
 
 async function poll() {
   const state = await fetchState();
@@ -32,45 +33,48 @@ async function poll() {
   }
 }
 
-poll();
-setInterval(poll, 2000);
-
 // --- Click-to-dispatch (desktop) ---
 let clickState = 0; // 0=set start, 1=set end, 2=dispatch
 let dispatching = false;
+const DISPATCH_UNIT_ID = 'dispatched';
 
-cesium.onLeftClick(async ({ lat, lng }) => {
-  if (replay.isPlaying) return;
+function attachInteractions() {
+  if (!cesium.viewer) return;
 
-  if (clickState === 0) {
-    cesium.setStartMarker(lat, lng);
-    clickState = 1;
-    updateInstructions('Right trigger / next click: Set END point');
-  } else if (clickState === 1) {
-    cesium.setEndMarker(lat, lng);
-    clickState = 2;
-    updateInstructions('Click again to dispatch route');
-  } else {
-    if (dispatching) return;
-    dispatching = true;
-    const start = cesium.getStartLatLng();
-    const end = cesium.getEndLatLng();
-    if (!start || !end) { dispatching = false; return; }
+  cesium.onLeftClick(async ({ lat, lng }) => {
+    if (replay.isPlaying) return;
 
-    speak('Route calculated. Dispatching unit to destination.');
-    const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
-    const waypoints = result.waypoints ?? [];
-    cesium.addSingleRoute(waypoints, 'dispatched');
-    if (result.rerouted) {
-      speak('Warning. Route rerouted due to hazard. New path calculated.');
-      cesium.highlightReroute('dispatched');
+    if (clickState === 0) {
+      cesium.setStartMarker(lat, lng);
+      clickState = 1;
+      updateInstructions('Right trigger / next click: Set END point');
+    } else if (clickState === 1) {
+      cesium.setEndMarker(lat, lng);
+      clickState = 2;
+      updateInstructions('Click again to dispatch route');
+    } else {
+      if (dispatching) return;
+      dispatching = true;
+      const start = cesium.getStartLatLng();
+      const end = cesium.getEndLatLng();
+      if (!start || !end) { dispatching = false; return; }
+
+      speak('Route calculated. Dispatching unit to destination.');
+      const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng, DISPATCH_UNIT_ID);
+      const waypoints = result.waypoints ?? [];
+      const routeKey = result.unit_id ?? result.route_id ?? DISPATCH_UNIT_ID;
+      cesium.addSingleRoute(waypoints, routeKey);
+      if (result.rerouted) {
+        speak('Warning. Route rerouted due to hazard. New path calculated.');
+        cesium.highlightReroute(routeKey);
+      }
+
+      clickState = 0;
+      dispatching = false;
+      updateInstructions('Click to set START point');
     }
-
-    clickState = 0;
-    dispatching = false;
-    updateInstructions('Click to set START point');
-  }
-});
+  });
+}
 
 function updateInstructions(text) {
   const el = document.getElementById('instructions');
@@ -115,3 +119,15 @@ function rafLoop() {
   requestAnimationFrame(rafLoop);
 }
 rafLoop();
+
+async function bootstrap() {
+  await cesium.ready;
+
+  if (!cesium.viewer) return;
+
+  poll();
+  pollIntervalId = setInterval(poll, 2000);
+  attachInteractions();
+}
+
+bootstrap();
