@@ -1,7 +1,7 @@
 """Parse natural language field reports using Gemma 2B via Google AI SDK.
 
 Verified SDK: pip install google-genai → from google import genai (v1.73.1)
-Fallback model: gemini-2.0-flash-lite (same API, swap MODEL_ID)
+Fallback model: gemini-2.0-flash (same API, swap MODEL_ID)
 """
 import json
 import os
@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 from google import genai
 
-MODEL_ID = "gemma-3-1b-it"
-FALLBACK_MODEL_ID = "gemini-2.0-flash-lite"
+MODEL_ID = "gemma-2-2b-it"
+FALLBACK_MODEL_ID = "gemini-2.0-flash"
 BLOCKED_KEYWORDS = ("block", "blocked", "closed", "closure", "debris", "collapse", "impassable", "downed", "washed out")
 PASSABLE_KEYWORDS = ("clear", "cleared", "passable", "open", "reopened", "safe to pass")
 COORD_RE = re.compile(r"(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)")

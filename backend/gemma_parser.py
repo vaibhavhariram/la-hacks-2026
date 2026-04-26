@@ -15,7 +15,7 @@ Field report: "{report}"
 
 
 def parse_field_report(report: str) -> dict[str, Any]:
-    prompt = _PROMPT_TEMPLATE.format(report=report)
+    prompt = _PROMPT_TEMPLATE.replace("{report}", report)
 
     try:
         resp = requests.post(

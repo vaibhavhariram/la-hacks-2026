@@ -1,6 +1,5 @@
 import { CesiumViewer } from './scene/CesiumViewer.js';
 import { ReplayController } from './scene/ReplayController.js';
-import { VRScene } from './xr/VRScene.js';
 import { fetchState, fetchRoute, postHazard } from './api/client.js';
 import { speak } from './audio/VoiceAlerts.js';
 
@@ -26,10 +25,6 @@ async function poll() {
     if (state.hazards) {
       latestHazards = state.hazards;
       cesium.syncHazards(latestHazards);
-      if (vrScene) vrScene.updateHazards(latestHazards);
-    }
-    if (state.routes && vrScene) {
-      vrScene.updateRoutes(state.routes);
     }
   } else {
     dot?.classList.remove('connected');
@@ -45,7 +40,6 @@ let clickState = 0; // 0=set start, 1=set end, 2=dispatch
 let dispatching = false;
 
 cesium.onLeftClick(async ({ lat, lng }) => {
-  if (replay.isPlaying) return;
 
   if (clickState === 0) {
     cesium.setStartMarker(lat, lng);
@@ -60,20 +54,35 @@ cesium.onLeftClick(async ({ lat, lng }) => {
     dispatching = true;
     const start = cesium.getStartLatLng();
     const end = cesium.getEndLatLng();
+    console.log('[dispatch] start:', start, 'end:', end);
     if (!start || !end) { dispatching = false; return; }
 
-    speak('Route calculated. Dispatching unit to destination.');
-    const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
-    const waypoints = result.path ?? result.waypoints ?? [];
-    cesium.addSingleRoute(waypoints, 'dispatched');
-    if (result.rerouted) {
-      speak('Warning. Route rerouted due to hazard. New path calculated.');
-      cesium.highlightReroute('dispatched');
+    updateInstructions('Calculating route...');
+    try {
+      const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
+      console.log('[dispatch] result:', result);
+      const waypoints = result.waypoints ?? [];
+      if (waypoints.length === 0) {
+        updateInstructions('No route found — try points closer to Altadena streets');
+        dispatching = false;
+        clickState = 0;
+        return;
+      }
+      cesium.addSingleRoute(waypoints, 'dispatched');
+      if (result.rerouted) {
+        speak('Warning. Route rerouted due to hazard. New path calculated.');
+        cesium.highlightReroute('dispatched');
+      } else {
+        speak('Route calculated. Dispatching unit to destination.');
+      }
+      updateInstructions('Click to set START point');
+    } catch (e) {
+      console.error('[dispatch] error:', e);
+      updateInstructions('Route error: ' + e.message);
+    } finally {
+      dispatching = false;
+      clickState = 0;
     }
-
-    clickState = 0;
-    dispatching = false;
-    updateInstructions('Click to set START point');
   }
 });
 
@@ -96,14 +105,33 @@ document.getElementById('replay-btn')?.addEventListener('click', () => {
   replay.startReplay(async (event) => {
     const id = `replay-${event.timestamp_ms}`;
     replayHazards.push({ id, ...event });
-    const allHazards = [...latestHazards, ...replayHazards];
-    cesium.syncHazards(allHazards);
-    if (vrScene) vrScene.updateHazards(allHazards);
+    cesium.syncHazards([...latestHazards, ...replayHazards]);
     await postHazard(event.lat, event.lng, event.radius_m, 0.9, 'fire');
   });
 
   document.getElementById('replay-btn').textContent = 'STOP REPLAY';
   speak('Eaton Fire replay initiated. January eighth, twenty twenty five.');
+});
+
+// --- Demo route button ---
+// Pre-set: Lake Ave (west Altadena) → Eaton Ave (east Altadena), right through the fire path
+const DEMO_START = { lat: 34.1897, lng: -118.1480 };
+const DEMO_END   = { lat: 34.1895, lng: -118.0920 };
+
+document.getElementById('demo-route-btn')?.addEventListener('click', async () => {
+  cesium.setStartMarker(DEMO_START.lat, DEMO_START.lng);
+  cesium.setEndMarker(DEMO_END.lat, DEMO_END.lng);
+  updateInstructions('Calculating demo route...');
+  const result = await fetchRoute(DEMO_START.lat, DEMO_START.lng, DEMO_END.lat, DEMO_END.lng);
+  const waypoints = result.waypoints ?? [];
+  if (waypoints.length) {
+    cesium.addSingleRoute(waypoints, 'dispatched');
+    speak('Route calculated. Dispatching unit to destination.');
+    updateInstructions('Click REPLAY EATON FIRE to watch rerouting');
+  } else {
+    updateInstructions('No route found for demo coordinates');
+  }
+  clickState = 0;
 });
 
 // --- Home button ---
@@ -112,36 +140,8 @@ document.getElementById('home-btn')?.addEventListener('click', () => {
 });
 
 // --- VR button ---
-let vrScene = null;
-
-document.getElementById('enter-vr-btn')?.addEventListener('click', async () => {
-  if (vrScene) return; // already in VR
-
-  vrScene = new VRScene();
-
-  // seed VR scene with current state before launching
-  vrScene.updateHazards(latestHazards);
-  vrScene.updateRoutes([]);
-
-  await vrScene.launch({
-    onDispatch: async (start, end) => {
-      speak('Route calculated. Dispatching unit to destination.');
-      const result = await fetchRoute(start.lat, start.lng, end.lat, end.lng);
-      const waypoints = result.path ?? result.waypoints ?? [];
-      vrScene.updateRoutes([{ waypoints, rerouted: result.rerouted }]);
-      if (result.rerouted) speak('Warning. Route rerouted due to hazard. New path calculated.');
-    },
-    onExit: () => {
-      // restore Cesium when VR session ends
-      document.getElementById('cesium-container').style.display = '';
-      document.getElementById('enter-vr-btn').textContent = 'ENTER VR';
-      vrScene = null;
-    },
-  });
-
-  // hide Cesium while in VR — Three.js owns the display
-  document.getElementById('cesium-container').style.display = 'none';
-  document.getElementById('enter-vr-btn').textContent = 'EXIT VR';
+document.getElementById('enter-vr-btn')?.addEventListener('click', () => {
+  alert('Open this URL on the Quest 2 browser, then use the Cesium globe in fullscreen mode.');
 });
 
 // --- Replay controller update (needs a RAF loop for the clock overlay) ---

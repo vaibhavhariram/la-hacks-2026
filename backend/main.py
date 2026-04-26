@@ -23,6 +23,7 @@ from models import (
     RouteState,
     StateResponse,
 )
+from hazards import hazard_store
 from services.db_writes import save_field_report, save_hazard_event, utc_now_iso
 from services.route_service import NoRouteFoundError, RoutingEngineError, handle_route_request
 
@@ -184,16 +185,48 @@ async def create_route(
     )
 
 
+async def _reroute_affected_routes() -> None:
+    for i, route in enumerate(ROUTES):
+        if not route.path:
+            continue
+        affected = any(
+            hazard_store.get_fire_penalty_at(wp[0], wp[1]) >= 5.0
+            for wp in route.path
+        )
+        if not affected:
+            continue
+        start, end = route.path[0], route.path[-1]
+        try:
+            new_payload = await handle_route_request(
+                RouteRequest(
+                    start_lat=start[0], start_lng=start[1],
+                    end_lat=end[0], end_lng=end[1],
+                    unit_id=route.unit_id,
+                )
+            )
+            ROUTES[i] = RouteState(
+                route_id=new_payload["route_id"],
+                unit_id=route.unit_id,
+                path=new_payload["path"],
+                rerouted=True,
+            )
+            logger.info("rerouted unit_id=%s", route.unit_id)
+        except Exception:
+            logger.exception("reroute failed for unit_id=%s", route.unit_id)
+
+
 @app.post("/hazard", response_model=HazardResponse)
 async def create_hazard(
     request: HazardRequest,
     background_tasks: BackgroundTasks,
 ) -> HazardResponse:
-    # Mock hazard application only: keep the hazard in memory and return fake
-    # graph-impact counts so the frontend can exercise update flows.
     hazard_state = build_hazard_state(request)
     HAZARDS.append(hazard_state)
 
+    node_id = hash((request.lat, request.lng)) & 0x7FFFFFFF
+    hazard_store.add_fire_node(node_id, request.lat, request.lng, request.severity)
+
+    background_tasks.add_task(_reroute_affected_routes)
     background_tasks.add_task(
         save_hazard_event,
         {

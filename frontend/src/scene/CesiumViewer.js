@@ -6,24 +6,23 @@ import {
   Color,
   Math as CesiumMath,
   createWorldTerrainAsync,
+  createWorldImageryAsync,
+  IonWorldImageryStyle,
   ImageryLayer,
-  UrlTemplateImageryProvider,
   PolylineGlowMaterialProperty,
   HeightReference,
   VerticalOrigin,
   ScreenSpaceEventType,
   ConstantProperty,
+  EllipsoidTerrainProvider,
 } from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN ?? '';
-
-const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN ?? '';
-if (CESIUM_ION_TOKEN) {
-  Ion.defaultAccessToken = CESIUM_ION_TOKEN;
-} else {
-  console.warn('[CesiumViewer] VITE_CESIUM_ION_TOKEN not set; terrain may be degraded');
+const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
+if (!CESIUM_ION_TOKEN) {
+  console.warn('[CesiumViewer] VITE_CESIUM_ION_TOKEN is not set; terrain/imagery may fail to load.');
 }
+Ion.defaultAccessToken = CESIUM_ION_TOKEN ?? '';
 
 // Eaton Fire origin — Altadena, CA
 const HOME_LAT = 34.1897;
@@ -46,43 +45,35 @@ export class CesiumViewer {
     this.hazardEntities = new Map();  // hazardId → Entity
     this.startMarker = null;
     this.endMarker = null;
+    this._startLatLng = null;
+    this._endLatLng = null;
     this._boundsCheckInterval = null;
-    this._pendingLeftClickCallback = null;
+    this._pendingClickCallback = null;
     this._init(containerId);
   }
 
   async _init(containerId) {
-    try {
-      await this._initInner(containerId);
-    } catch (e) {
-      console.error('[CesiumViewer] init failed:', e);
-    }
-  }
-
-  async _initInner(containerId) {
+    // Cesium needs a real DOM container, not a canvas
     const container = document.getElementById(containerId);
     if (!container) {
       console.error('[CesiumViewer] container not found:', containerId);
       return;
     }
 
+    // Remove Three.js canvas if present — we own the viewport now
     const oldCanvas = document.querySelector('canvas');
     if (oldCanvas) oldCanvas.remove();
 
-    let terrainProvider;
-    if (CESIUM_ION_TOKEN) {
-      try {
-        terrainProvider = await createWorldTerrainAsync({
-          requestWaterMask: true,
-          requestVertexNormals: true,
-        });
-      } catch (e) {
-        console.warn('[CesiumViewer] createWorldTerrainAsync failed; falling back:', e?.message ?? e);
-      }
-    }
+    const terrainProvider = CESIUM_ION_TOKEN
+      ? await createWorldTerrainAsync({
+        requestWaterMask: true,
+        requestVertexNormals: true,
+      })
+      : new EllipsoidTerrainProvider();
 
     this.viewer = new Viewer(container, {
       terrainProvider,
+      baseLayer: false,
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,
@@ -97,21 +88,16 @@ export class CesiumViewer {
       shouldAnimate: true,
     });
 
-    // Mapbox satellite imagery (optional). If token is missing, keep Cesium's
-    // default imagery so the globe still renders instead of going blank.
-    if (MAPBOX_TOKEN) {
+    if (CESIUM_ION_TOKEN) {
+      // Bing aerial via createWorldImagery — served through Ion CDN, always CORS-safe
       this.viewer.imageryLayers.removeAll();
       this.viewer.imageryLayers.add(
         new ImageryLayer(
-          new UrlTemplateImageryProvider({
-            url: `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`,
-            maximumLevel: 19,
+          await createWorldImageryAsync({
+            style: IonWorldImageryStyle.AERIAL_WITH_LABELS,
           })
         )
       );
-      console.log('[CesiumViewer] Mapbox satellite imagery loaded');
-    } else {
-      console.warn('[CesiumViewer] VITE_MAPBOX_TOKEN not set; using default imagery');
     }
 
     // Maximize terrain detail
@@ -133,15 +119,13 @@ export class CesiumViewer {
     // Enforce CA bounds
     this._startBoundsEnforcement();
 
-    console.log('[CesiumViewer] Globe initialized — Altadena, CA');
-
-    // If someone registered click handlers before Cesium finished initializing,
-    // attach them now.
-    if (this._pendingLeftClickCallback) {
-      const cb = this._pendingLeftClickCallback;
-      this._pendingLeftClickCallback = null;
-      this.onLeftClick(cb);
+    // Register any click handler that was attached before init completed
+    if (this._pendingClickCallback) {
+      this._registerClickHandler(this._pendingClickCallback);
+      this._pendingClickCallback = null;
     }
+
+    console.log('[CesiumViewer] Globe initialized — Altadena, CA');
   }
 
   flyHome() {
@@ -289,14 +273,13 @@ export class CesiumViewer {
     if (!this.viewer) return;
     const entity = this.viewer.entities.add({
       id: `hazard-${id}`,
-      position: Cartesian3.fromDegrees(h.lng, h.lat),
+      position: Cartesian3.fromDegrees(h.lng, h.lat, 0),
       ellipse: {
         semiMajorAxis: h.radius_m,
         semiMinorAxis: h.radius_m,
-        material: Color.fromCssColorString('#ff4400').withAlpha(0.45),
-        outline: false,
         height: 0,
-        heightReference: HeightReference.CLAMP_TO_GROUND,
+        material: Color.fromCssColorString('#ff4400').withAlpha(0.25),
+        outline: false,
       },
     });
     this.hazardEntities.set(id, entity);
@@ -312,6 +295,7 @@ export class CesiumViewer {
 
   setStartMarker(lat, lng) {
     if (!this.viewer) return;
+    this._startLatLng = { lat, lng };
     if (this.startMarker) this.viewer.entities.remove(this.startMarker);
     this.startMarker = this.viewer.entities.add({
       id: 'marker-start',
@@ -337,6 +321,7 @@ export class CesiumViewer {
 
   setEndMarker(lat, lng) {
     if (!this.viewer) return;
+    this._endLatLng = { lat, lng };
     if (this.endMarker) this.viewer.entities.remove(this.endMarker);
     this.endMarker = this.viewer.entities.add({
       id: 'marker-end',
@@ -367,36 +352,39 @@ export class CesiumViewer {
   }
 
   getStartLatLng() {
-    if (!this.startMarker) return null;
-    const pos = this.startMarker.position.getValue();
-    const carto = Cartographic.fromCartesian(pos);
-    return { lat: CesiumMath.toDegrees(carto.latitude), lng: CesiumMath.toDegrees(carto.longitude) };
+    return this._startLatLng;
   }
 
   getEndLatLng() {
-    if (!this.endMarker) return null;
-    const pos = this.endMarker.position.getValue();
-    const carto = Cartographic.fromCartesian(pos);
-    return { lat: CesiumMath.toDegrees(carto.latitude), lng: CesiumMath.toDegrees(carto.longitude) };
+    return this._endLatLng;
   }
 
   // --- Click handling for desktop dispatch ---
 
   onLeftClick(callback) {
-    if (!this.viewer) {
-      this._pendingLeftClickCallback = callback;
-      return;
+    if (this.viewer) {
+      this._registerClickHandler(callback);
+    } else {
+      this._pendingClickCallback = callback;
     }
-    this.viewer.screenSpaceEventHandler.setInputAction((click) => {
-      const ray = this.viewer.camera.getPickRay(click.position);
-      const pos = this.viewer.scene.globe.pick(ray, this.viewer.scene);
+  }
+
+  _registerClickHandler(callback) {
+    const handler = (event) => {
+      const position = event.position ?? event.endPosition;
+      if (!position) return;
+      const ray = this.viewer.camera.getPickRay(position);
+      const pos =
+        this.viewer.scene.globe.pick(ray, this.viewer.scene) ??
+        this.viewer.camera.pickEllipsoid(position, this.viewer.scene.globe.ellipsoid);
       if (!pos) return;
       const carto = Cartographic.fromCartesian(pos);
       callback({
         lat: CesiumMath.toDegrees(carto.latitude),
         lng: CesiumMath.toDegrees(carto.longitude),
       });
-    }, ScreenSpaceEventType.LEFT_CLICK);
+    };
+    this.viewer.screenSpaceEventHandler.setInputAction(handler, ScreenSpaceEventType.LEFT_CLICK);
   }
 
   destroy() {

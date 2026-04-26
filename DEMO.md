@@ -23,6 +23,7 @@ Fill these when available:
 - `AGENTVERSE_API_KEY` and `AGENT_SEED` for Fetch.ai prize rehearsal.
 - `GOOGLE_AI_API_KEY` for real Gemma parsing.
 - `VITE_CESIUM_ION_TOKEN` for satellite imagery/terrain polish.
+- `MONGO_URI` or `MONGODB_URI` for persistent backend writes.
 - `MONGO_URI` or `MONGODB_URI` for persistent backend writes. Use `MONGO_DIRECT_URI` only if Atlas SRV DNS breaks TLS locally.
 - `FIRMS_MAP_KEY` only if refreshing real fire data.
 

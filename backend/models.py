@@ -1,8 +1,5 @@
-from __future__ import annotations
-
-from typing import Literal, Optional
-
 from pydantic import BaseModel
+from typing import Optional
 
 
 class RouteRequest(BaseModel):
@@ -28,11 +25,11 @@ class RouteState(BaseModel):
 
 
 class HazardRequest(BaseModel):
-    type: Literal["fire", "blocked"]
     lat: float
     lng: float
     radius_m: float
     severity: float
+    type: str = "fire"
 
 
 class HazardResponse(BaseModel):
@@ -41,13 +38,17 @@ class HazardResponse(BaseModel):
 
 
 class HazardState(BaseModel):
-    event_id: Optional[str] = None
     type: str
     lat: float
     lng: float
     radius_m: float
     severity: float
     timestamp: str
+
+
+class StateResponse(BaseModel):
+    hazards: list[HazardState]
+    routes: list[RouteState]
 
 
 class FieldReportRequest(BaseModel):
@@ -64,8 +65,3 @@ class FieldReportParsed(BaseModel):
 
 class FieldReportResponse(BaseModel):
     parsed: FieldReportParsed
-
-
-class StateResponse(BaseModel):
-    hazards: list[HazardState]
-    routes: list[RouteState]

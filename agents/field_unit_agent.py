@@ -18,12 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-import certifi
 from dotenv import load_dotenv
-
-os.environ.setdefault("SSL_CERT_FILE", certifi.where())
-os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
-
 from uagents import Agent, Context, Protocol
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,

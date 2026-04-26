@@ -1,7 +1,5 @@
-// Keep this in sync with the Altadena/Eaton Fire scene center used by
-// `frontend/src/scene/CesiumViewer.js` and `frontend/src/xr/VRScene.js`.
-const CENTER_LAT = 34.1897;
-const CENTER_LNG = -118.1315;
+const CENTER_LAT = 34.0522;
+const CENTER_LNG = -118.2437;
 const METERS_PER_UNIT = 100;
 
 const LAT_METERS = 111320;

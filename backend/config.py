@@ -12,9 +12,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 @dataclass(frozen=True)
 class Settings:
-    mongo_uri: str = (
-        os.getenv("MONGO_DIRECT_URI") or os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or ""
-    ).strip()
+    mongo_uri: str = (os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "").strip()
     db_name: str = os.getenv("DB_NAME", "la_hacks_2026").strip() or "la_hacks_2026"
     mongo_server_selection_timeout_ms: int = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "8000"))
     mongo_connect_timeout_ms: int = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "4000"))
