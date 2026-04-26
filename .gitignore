@@ -5,3 +5,4 @@ __pycache__/
 audio/
 *.graphml
 backend/la_graph.graphml
+backend/cache/
